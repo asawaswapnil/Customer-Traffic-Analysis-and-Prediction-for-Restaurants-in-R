@@ -13,7 +13,7 @@ To see the methods, anaylsis and results:
 See the Project_Report_Data_Mining.pdf
 
 To run the code:
-Download the folder; download wather data from https://drive.google.com/drive/u/0/folders/151-xuo152SWNFZbDSkTq9rHP0ylNBLNM or from Japan Metrological Department http://www.data.jma.go.jp/gmd/risk/obsdl/index.php and add it to the folder; run the .rmd in RStudios.
+Download the folder; download wather folder from https://drive.google.com/drive/u/0/folders/151-xuo152SWNFZbDSkTq9rHP0ylNBLNM or from Japan Metrological Department http://www.data.jma.go.jp/gmd/risk/obsdl/index.php and add it to the folder; run the .rmd in RStudios.
 
 
 Developed by Swapnil Asawa and Ainur Baikara
