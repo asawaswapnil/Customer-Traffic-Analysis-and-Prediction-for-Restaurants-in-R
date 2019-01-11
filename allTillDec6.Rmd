@@ -1,0 +1,823 @@
+---
+title: "Restaurants"
+author: "Swapnil, Ainur"
+date: "31 October 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+### Importing libraries
+
+```{r}
+library(ggplot2)
+library(MASS) # for the example dataset 
+library(plyr) # for recoding data
+library(ROCR) # for plotting roc
+library(e1071) # for NB and SVM
+library(rpart) # for decision tree
+library(tree)
+library(ada) # for adaboost
+library(class)#for KNN
+library(dplyr)
+library(caret)
+library(forecast)
+library(tseries)
+library(leaflet)
+```
+
+# PREPROCESSING
+read booking information
+```{r cars}
+a_booked_time=read.csv("air_reserve.csv",header=TRUE, sep=",") # store_id, bookingdatetime, visitdatetime
+#summary(a_booked_time) 
+```
+
+### load calendar (holiday dataset)
+```{r}
+cal=read.csv("date_info.csv",header=TRUE, sep=",")
+head(cal)
+```
+Changing all date_time information to date only, as we do not have enough information to do hourly prediction
+```{r}
+visitDateTime=as.factor(a_booked_time$visit_datetime)
+visitDate=substr(visitDateTime, start = 1, stop = 10)
+reserveDateTime=as.factor(a_booked_time$reserve_datetime)
+reserveDate=substr(reserveDateTime, start = 1, stop = 10)
+visitDate=as.Date(visitDate)
+reserveDate=as.Date(reserveDate)
+a_booked=a_booked_time
+a_booked$visit_datetime=visitDate
+a_booked$reserve_datetime=reserveDate
+head(a_booked)
+```
+importing store location information
+```{r}
+a_store_addr=read.csv("air_store_info.csv",header=TRUE, sep=",")
+head(a_store_addr)
+dim(a_store_addr)
+```
+importing store visits per day information
+```{r}
+a_visited=read.csv("air_visit_data.csv",header=TRUE, sep=",")
+#head(a_visited)
+dim(a_visited)
+head(a_visited)
+
+```
+# Data Analysis
+plotting number of visitors for all the restaurants togather throughout the time period
+```{r}
+a_visited_cal=merge(a_visited,cal, by.x="visit_date",by.y="calendar_date")
+visitDate=(a_visited$visit_date)
+visitDate=toString(visitDate)
+a_visited$visit_date=as.Date(a_visited$visit_date, format = "%Y-%m-%d")
+plot(a_visited$visit_date)
+ggplot(a_visited, aes(x =visit_date,y=visitors))+geom_point()
+```
+analysing cusine information
+```{r}
+#plot(a_store_addr, x = air_area_name)
+ggplot(a_store_addr, aes(x = air_genre_name)) + geom_bar()+facet_wrap(~air_genre_name, nrow = 2)+theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+summary(a_store_addr$air_genre_name)
+dim(a_store_addr)
+```
+## Conclusion:
+- Asian, international cuisine, karoke/party should be removed as main category and could be clubbed with other 
+- Boosting method might be good because classes are so imbalanced.  
+
+```{r}
+head(a_store_addr)
+xy=c(levels(a_store_addr$air_genre_name))
+a_store_addr$air_genre_name[which(a_store_addr$air_genre_name %in% c("Asian", "Karaoke/Party", "International cuisine"))] <- factor("Other")
+ a_store_addr$air_genre_name=factor(a_store_addr$air_genre_name)
+summary(a_store_addr$air_genre_name)
+ggplot(a_store_addr, aes(x = air_genre_name)) + geom_bar()+facet_wrap(~air_genre_name, nrow = 2)+theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+```
+analysing number of visitors v/s day of the week
+analysing number of visitors v/s if it is a holiday
+```{r}
+ggplot(a_visited_cal, aes(x = visitors)) + geom_density(aes(group=day_of_week, fill=day_of_week), alpha=.5)+  xlim(0, 150)
+day.comp = aov(visitors ~ day_of_week, data =a_visited_cal ) 
+summary(day.comp)
+pairwise.t.test(a_visited_cal$visitors, a_visited_cal$day_of_week)
+```
+- Seems like day of the week matters with the tests.
+### Importing weather data.
+Analyzed randomly see the weather dataset( 1663 files of 1663 areas). More than 60% of the data had 6 variables: avg_temp, min_temp, max_temp, precipitation, hour_sunlight, wind speed. To tried to only extract that. 
+```{r}
+temp = list.files(path="./weather/",pattern="*.csv")
+temp2=temp
+temp2=paste("./weather/",temp, sep='')
+n=dim(as.data.frame(temp))[1]
+  w.data=read.csv(temp2[1], header = TRUE, sep=",")
+  data.prac=data.frame(w.data$calendar_date)
+  data.mint=data.frame(w.data$calendar_date)
+  data.maxt=data.frame(w.data$calendar_date)
+  data.avgt=data.frame(w.data$calendar_date)
+  data.hrsun=data.frame(w.data$calendar_date)
+  data.windsp=data.frame(w.data$calendar_date)
+for(i in 1:n){
+  w.data=read.csv(temp2[i], header = TRUE, sep=",")
+  row.names(w.data)
+  data.prac =cbind(data.prac, w.data$precipitation)
+  data.mint=cbind(data.mint, w.data$low_temperature)
+  data.maxt =cbind(data.maxt, w.data$high_temperature)
+  data.avgt =cbind(data.prac, w.data$avg_temperature)
+  data.hrsun =cbind(data.prac, w.data$hours_sunlight)
+  data.windsp =cbind(data.prac, w.data$avg_wind_speed)
+
+  names(data.prac)[names(data.prac)=="w.data$precipitation"] <- temp[i]
+  names(data.mint)[names(data.mint)=="w.data$low_temprature"] <- temp[i]
+  names(data.maxt)[names(data.prac)=="w.data$high_temprature"] <- temp[i]
+  names(data.avgt)[names(data.prac)=="w.data$avg_temprature"] <- temp[i]
+  names(data.hrsun)[names(data.prac)=="w.data$hours_sunlight"] <- temp[i]
+  names(data.windsp)[names(data.prac)=="w.data$avg_wind_speed"] <- temp[i]
+}
+```
+
+```{r}
+head(a_visited_cal)
+ggplot(a_visited_cal, aes(x = visitors)) + geom_density(aes(group=holiday_flg, fill=holiday_flg), alpha=.5)+  xlim(0, 150)
+day.comp = aov(visitors ~ holiday_flg, data =a_visited_cal ) 
+summary(day.comp)
+pairwise.t.test(a_visited_cal$visitors, a_visited_cal$holiday_flg)
+```
+Seems like holiday information is also significantly useful with t test. 
+
+Mapping of the restaurants. This visual would make it easier to see the areas where the most of the restaurants are located. As can be seen from the map, there are top three areas: Tokyo, Kyoto and Osaka
+```{r}
+map_air <- leaflet(a_store_addr) %>% addTiles('http://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png') 
+map_air %>% addCircles(~longitude, ~latitude, popup=a_store_addr$air_area_name, weight = 3, radius=40, 
+                 color="#ffa500", stroke = TRUE, fillOpacity = 0.8)
+```
+
+```{r}
+ggplot(a_visited_cal, aes(x = visitors)) + stat_ecdf()+scale_x_continuous(name="No of visitors",breaks=c(0,5,7,9,13,15,17,20,22,25,30,35,40,50,60,70,100,150), limits=c(0,150))+scale_y_continuous(name="cdf",breaks=c(0,0.2,0.4,0.6,0.8,1.0), limits=c(0,1))
+summary(a_visited_cal$visitors)
+```
+
+
+
+So, 
+if we devide the dataset into 5 classes, our classes would be:
+Class1: no of visitors betwen 0-6, size of 7
+Class2: no of visitors betwen 7-14, size of 8
+Class3: no of visitors betwen 14-22, size of 8
+Class4: no of visitors betwen 23-35, size of 13
+Class5: no of visitors betwen 35 and more
+The median is 17. And we devide the data on 17 if we use ony 2 classes to keep the data balanced.
+
+
+```{r}
+head(a_store_addr)
+dim(a_store_addr)
+```
+s
+Adding all the reservations until taday for next week.
+```{r}
+air_vis1 <- a_booked %>%
+  filter((as.Date(visit_datetime)-as.Date(reserve_datetime))>7) %>%
+  group_by(visit_datetime,air_store_id) %>%
+  summarize(vis=sum(reserve_visitors))
+colnames(air_vis1)[colnames(air_vis1)=="visit_datetime"] <- "visit_date"
+colnames(air_vis1)[colnames(air_vis1)=="vis"] <- "bookingsTillLastWeek"
+head(air_vis1)
+```
+
+Or Adding all the reservations(not for predicting future)
+```{r}
+air_vis2 <- a_booked %>%
+  group_by(visit_datetime,air_store_id) %>%
+  summarize(vis=sum(reserve_visitors))
+head(air_vis2)
+
+```
+
+
+
+Merging booking done one week in advance with the actual visits.
+```{r}
+head(air_vis1)
+head(a_visited)
+airBV=merge(air_vis1, a_visited, all=TRUE)
+head(airBV)
+airBV$visitors[is.na(airBV$visitors)] <- 0
+head(airBV)
+airBV$bookingsTillLastWeek[is.na(airBV$bookingsTillLastWeek)] <- 0
+head(airBV)
+
+airBV[0:50,]
+summary(airBV)
+dim(airBV)
+```
+
+l``{r}
+library(ggplot2)
+p <- airBV %>%
+  filter(visitors<400, bookingsTillLastWeek<150) %>%
+  ggplot(aes( bookingsTillLastWeek,visitors)) +
+  geom_point(color = "black", alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "grey60") +
+  geom_smooth(method = "lm", color = "blue")
+p
+``
+points lower than grey line shows more people booked in advance than visited
+points upper than grey line shows less people booked one week in advance but visited
+
+
+Merging bookings, visits, and location information
+```{r}
+airBVI=merge(airBV, a_store_addr)
+airBVI$visit_date=as.Date(airBVI$visit_date)
+head(airBVI)
+```
+Some preprocessing on calander before merging it with main date
+```{r}
+colnames(cal)[colnames(cal)=="calendar_date"]= "visit_date"
+cal$visit_date=as.Date(cal$visit_date)
+head(cal)
+```
+
+Merging bookings, visits, and location, calender information
+order data by dates
+```{r}
+airBVIC=merge(airBVI, cal)
+head(airBVIC)
+airBVIC =airBVIC[order(airBVIC$visit_date),] 
+head(airBVIC)
+tail(airBVIC)
+dim(airBVIC) 
+```
+Removing air_Area name as it is essentially giving us no more info than what location is giving us
+```{r}
+airBVICwoAname=airBVIC[,-6]
+head(airBVICwoAname)
+```
+
+
+The restaurant id info is itself very strong indicator if visitors will come or not, that if given, nothing else is more informative. 
+
+
+```{r}
+labels = airBVIC$air_store_id
+d=airBVIC
+do.pca <- function(dataset,lbls,
+                   do.screeplot=F,do.scatter=F,do.biplot=F,do.loadingplot=F) {
+  data.pca = prcomp(dataset, scale=TRUE) 
+  data.pc = predict(data.pca)
+  if (do.screeplot) plot(data.pca, main='screeplot for PCA')
+  if (do.scatter) {
+    plot(data.pc[,1:2], type="n")
+    text(x=data.pc[,1], y=data.pc[,2], labels=lbls)    
+  }
+  if (do.biplot) biplot(data.pca)
+  if (do.loadingplot) {
+    plot(data.pca$rotation[,1],type='l')
+    #    plot(data.pc[,1],type='l')
+  }
+  data.pc
+}
+d$visit_date=as.numeric(d$visit_date)
+d$air_store_id = as.numeric(d$air_store_id)
+d$air_genre_name = droplevels(d$air_genre_name)
+head(d)
+head(airBVIC)
+d=as.data.frame(airBVIC[,-2])
+head(d)
+```
+
+
+To apply classification techs, we need to devide o/p in classes
+
+```{r}
+airBVICC=airBVIC
+airBVICC$visitors[airBVICC$visitors<17]=0
+airBVICC$visitors[airBVICC$visitors>=17]=1
+airBVICC$visitors=as.factor(airBVICC$visitors)
+head(airBVICC)
+```
+grouping and changing types of some predictors. 
+
+Date was needed to combine the data. but date itself doesn't give much information. The information it can give which is day, holiday, weather, etc. Most of these variables we have in our dataset. But many dates will make it difficult for us to classify. To keep track of weather, the month could also give sufficient information as date, but reduces the computation.So we are converting the date to month after all tables are merged. Surely, it will reduce the accuracy if we had lot of data, but we don't have very large data to leverage the date information anyway. 
+
+air_area_name is not useful as it is giving no more info than waht's given by location cordinates. It was only useful to match weather and main data. 
+
+```{r}
+
+airc=airBVICC
+airc$visit_date=(strftime(airc$visit_date, "%m"))
+airc$visit_date=as.numeric(airc$visit_date)
+airc$air_store_id = as.numeric(airc$air_store_id)
+airc$air_genre_name = droplevels(airc$air_genre_name)
+summary(airc)
+airc=airc[,-6]
+airc$y=airc$visitors
+airc=airc[,-4]
+dim(airc)
+head(airc)
+aira=airc
+head(aira)
+aira= model.matrix(~.,data=aira) 
+head(aira)
+aira<-data.frame(aira)
+colnames(aira)[which(names(aira) == "y1")] <- "y"
+aira$y=as.numeric(aira$y)
+aira=as.data.frame(aira[,-1])
+
+dim(aira)
+head(aira)
+head(aira)
+dim(aira)
+summary(aira[1:30000,])
+airs=airc
+colnames(airs)[which(names(airs) == "visitors")] <- "y"
+head(airs)
+airs$y=as.numeric(airs$y)
+#res=my.classifier(aira[1:50000,], cl.name='knn',do.cv=F)
+```
+
+
+
+we need to convert categorical predictors into numeric predictors for KNN.
+```{r}
+#summary(airBVICC$bookingsTillLastWeek)
+airBVICCN=airBVICC[,c("visit_date", "air_store_id", "bookingsTillLastWeek","air_genre_name", "air_area_name", "latitude", "longitude", "day_of_week", "holiday_flg", "visitors")]
+airBVICCN$visit_date = as.numeric(airBVICCN$visit_date)
+airBVICCN$air_store_id = as.numeric(airBVICCN$air_store_id)
+airBVICCN$air_genre_name = as.numeric(airBVICCN$air_genre_name)
+airBVICCN$air_area_name = as.numeric(airBVICCN$air_area_name)
+airBVICCN$day_of_week = as.numeric(airBVICCN$day_of_week)
+head(airBVICCN)
+summary(airBVICCN)
+```
+
+
+```{r}
+## standardize/normalize data 
+airs=airBVICCN
+airs[1:9] <- as.data.frame(scale(airBVICCN[,1:9]))
+summary(airs)
+```
+```{r}
+set.seed(12345) # set the seed so you can get exactly the same results whenever you run the code
+do.classification <- function(train.set, test.set, 
+                              cl.name, verbose=F) {
+  ## note: to plot ROC later, we want the raw probabilities,
+  ## not binary decisions
+  switch(cl.name,
+         knn = { # here we test k=1; you should evaluate different k's
+           prob = knn(train.set[,-1], test.set[,-1], cl=train.set[,1], k = 1, prob=T)
+           attr(prob,"prob")[prob==0] = 1-attr(prob,"prob")[prob==0] #modified
+           prob = attr(prob,"prob")
+           #print(cbind(prob,as.character(test.set$y)))
+           prob
+         },
+         knn3 = {
+           prob = knn(train.set[,-1], test.set[,-1], cl=train.set[,1], k = 3, prob=T)
+           attr(prob,"prob")[prob==0] = 1-attr(prob,"prob")[prob==0] #modified
+           prob = attr(prob,"prob")
+           #print(cbind(prob,as.character(test.set$y)))
+           prob
+         },
+         knn5 = { 
+           prob = knn(train.set[,-1], test.set[,-1], cl=train.set[,1], k = 5, prob=T)
+           attr(prob,"prob")[prob==0] = 1-attr(prob,"prob")[prob==0] #modified
+           prob = attr(prob,"prob")
+           #print(cbind(prob,as.character(test.set$y)))
+           prob
+         },
+         knn10 = { 
+           prob = knn(train.set[,-1], test.set[,-1], cl=train.set[,1], k = 10, prob=T)
+           attr(prob,"prob")[prob==0] = 1-attr(prob,"prob")[prob==0] #modified
+           prob = attr(prob,"prob")
+           #print(cbind(prob,as.character(test.set$y)))
+           prob
+         },
+         lr = { # logistic regression
+           model = glm(y~., family=binomial(link="logit"), data=train.set)
+           if (verbose) {
+             print(summary(model))             
+           }
+           prob = predict(model, newdata=test.set, type="response") 
+           #print(cbind(prob,as.character(test.set$y)))
+           prob
+         },
+         nb = { # naive bayes
+           model = naiveBayes(y~., data=train.set)
+           prob = predict(model, newdata=test.set, type="raw") 
+           #print(cbind(prob,as.character(test.set$y)))
+           
+           prob = prob[,2]/rowSums(prob) # renormalize the prob.
+           prob
+         },
+      
+            dtree = {
+           model = rpart(y~., data=train.set, method="anova")
+           prob = predict(model, newdata=test.set)
+         },
+         dtree2 = {
+           model = tree(y~.,data=as.data.frame(train.set),mindev=0.02, mincut=3)
+           prob = predict(model, newdata=test.set)
+          },
+         dtree3 = {
+           model = dtree(y~.,data=as.data.frame(train.set),methods=c("lm"), tuneLength=3)
+           prob = predict(model, newdata=as.data.frame(test.set))
+           plot(model)
+          text(model,digits=2)
+             # printcp(model)
+             #  plot(model, uniform=TRUE, main="Classification Tree")
+             # text(model, use.n=TRUE, all=TRUE, cex=.8)
+          },
+         dtreeprune = {
+           #model = rpart(y~., data=train.set)
+           model <- rpart(y~., data=train.set,control =rpart.control(minsplit=10,minbucket=3, cp=0.001,maxdepth=10))
+        
+           prob = predict(model, newdata=test.set)
+           
+           if (1) { # here we prune the tree
+             ## prune the tree 
+             pfit<- prune(model, cp=model$cptable[which.min(model$cptable[,"xerror"]),"CP"])
+             prob = predict(pfit, newdata=test.set)
+             ## plot the pruned tree 
+             plot(pfit, uniform=TRUE,main="Pruned Classification Tree")
+             text(pfit, use.n=TRUE, all=TRUE, cex=.8)             
+           }
+           #print(cbind(prob,as.character(test.set$y)))
+          # renormalize the prob.
+           prob
+         },
+         
+        
+         ada = {
+           model = ada(y~., data = train.set)
+           prob = predict(model, newdata=test.set, type='probs')
+           #print(cbind(prob,as.character(test.set$y)))
+           prob = prob[,2]/rowSums(prob)
+           prob
+         }
+  ) 
+}
+
+```
+
+
+To do time series cross validation
+```{r}
+
+timeseries.cv <- function(dataset, cl.name, t.fold=16, get.performance=T,prob.cutoff=0.5, val=TRUE) {
+  n=t.fold-3
+  n.obs <- nrow(dataset) # no. of observations 
+  ss=n.obs/t.fold
+  errors = dim(t.fold)
+  precisions = dim(t.fold)
+  recalls = dim(t.fold)
+  fscores = dim(t.fold)
+  accuracies = dim(t.fold)
+  probs = NULL
+  actuals = NULL
+  print(cl.name)
+  for (t in 1:n) {
+    ltrain=(t-1)*ss+1
+    utrain=((t+1)*ss)-1
+    lval=(t+1)*ss
+    uval=((t+2)*ss)-1
+    ltest=(t+2)*ss
+    utest=(t+3)*ss-1
+    train.set = dataset[ltrain:utrain,]
+      val.set=dataset[lval:uval,]
+      test.set = dataset[ltest:utest,]
+  if(val==FALSE)
+    {
+    val.set= test.set
+    }
+    #cat(t.fold,'-fold CV run',t,cl.name,':', '#training:',nrow(train.set),'#val:',nrow(val.set),'#testing',nrow(test.set),'\n')
+    prob = do.classification(train.set, val.set, cl.name)
+    predicted = as.numeric(prob > prob.cutoff)
+    actual = val.set$y
+    predicted=factor(predicted,levels=c(0,1))
+    confusion.matrix = table(actual,predicted)
+    confusion.matrix
+    error = (confusion.matrix[1,2]+confusion.matrix[2,1]) / nrow(test.set)
+    errors[t] = error
+    #cat('\t\terror=',error,'\n')
+    precision = (confusion.matrix[2,2]/(confusion.matrix[2,2]+confusion.matrix[1,2]+0.0001)) # so that denominator does't become 0
+    precisions[t] = precision
+    #print(confusion.matrix)
+    recall =(confusion.matrix[2,2]/(confusion.matrix[2,2]+confusion.matrix[2,1]+0.0001))
+    recalls[t] = recall
+    fscore = 2*precision*recall/(precision+recall+0.000001)
+    fscores[t] = fscore
+    probs = c(probs,prob)
+    actuals = c(actuals,actual)
+  }
+  avg.error = mean(errors)
+  cat('avg error=',avg.error,'\n')
+  avg.accuracy = 1 - avg.error
+  cat('avg Accuracy=',avg.accuracy,'\n')
+  avg.precision = mean(precisions)
+  cat('avg Precision=',avg.precision,'\n')
+  avg.recall = mean(recalls)
+  cat('avg recall=',avg.recall,'\n')
+  avg.fscore = mean(fscores)
+  cat('avg fscore=',avg.fscore,'\n')
+ 
+}
+
+```
+
+
+
+```{r}
+# 
+# # (1)-1 evaluate the 10-fold cv results in a performance table
+# colnames(airs)[which(names(airs) == "visitors")] <- "y"
+# head(airs)
+# 
+# results1 <- cbind(my.classifier(airc, cl.name='lr',do.cv=F),
+#                  my.classifier(airs, cl.name='knn',do.cv=F), # use dataset_num for kNN
+#                  my.classifier(airc, cl.name='nb',do.cv=F),
+#                  my.classifier(airc, cl.name='dtree',do.cv=F),
+#                  my.classifier(airc, cl.name='svm',do.cv=F),
+#                  my.classifier(airc, cl.name='ada',do.cv=F)
+# )
+```
+
+
+```{r}
+head(aira)
+timeseries.cv(aira, cl.name='dtree2', t.fold=16, get.performance=T, val=TRUE) 
+```
+So, our results are very poor when we used all the variables. As bas as a random guess.
+
+```{r}
+
+airarid=aira[,-2]
+head(airarid)
+timeseries.cv(airarid, cl.name='dtree2', t.fold=16, get.performance=T) 
+```
+results are bad even if we remove the store ids. As bas as a random guess.
+
+```{r}
+head(aira)
+timeseries.cv(aira[-1], cl.name='dtree2', t.fold=16, get.performance=T) 
+```
+Results are still bad if we remove date information. As bas as a random guess.
+
+
+```{r}
+head(aira)
+typeof(aira)
+data = subset(aira[, c("visit_date", "y")])
+timeseries.cv(data, cl.name='dtree2', t.fold=16, get.performance=T) 
+```
+It's still pretty bad. As bas as a random guess. 
+
+```{r}
+all.classifiers <- function(dataset) {
+  timeseries.cv(dataset, cl.name='dtree2', t.fold=16, get.performance=T)
+timeseries.cv(dataset, cl.name='dtree', t.fold=16, get.performance=T)
+timeseries.cv(dataset, cl.name='lr', t.fold=16, get.performance=T)
+timeseries.cv(dataset, cl.name='nb', t.fold=16, get.performance=T)
+}
+
+```
+
+
+```{r}
+# results1 <- cbind(timeseries.cv(aira, cl.name='dtree2', t.fold=16, get.performance=T) ,
+#                 my.classifier(airs, cl.name='knn',t.fold=16, do.cv=T),
+#                 timeseries.cv(aira, cl.name='dtree', t.fold=16, get.performance=T) ,
+#                timeseries.cv(aira, cl.name='lr', t.fold=16, get.performance=T) ,
+#                 timeseries.cv(aira, cl.name='nb', t.fold=16, get.performance=T) )
+
+```
+
+```{r}
+airss=airs
+colnames(airss)[which(names(airss) == "visitors")] <- "y"
+head(airss)
+```
+
+```{r}
+#all.classifiers(aira) 
+# 
+# timeseries.cv(aira, cl.name='dtreeprune', t.fold=32, get.performance=T) 
+# timeseries.cv(airss, cl.name='dtreeprune', t.fold=16, get.performance=T) 
+
+# model <- rpart(y~., data=aira[1:10000,],control =rpart.control(minsplit=10,minbucket=3, cp=0,maxdepth=10))
+# prob = predict(model, newdata=aira[10000:15000,])
+#  
+# model$cptable
+# 
+# pfit<- prune(model, cp=0.01)
+#     plot(model)
+#         x=which.min(model$cptable[,"xerror"])
+# print(x)
+# x=which.min(model$cptable[,"xerror"],"CP")
+    
+#head(airs)
+#do.classification(airc[1:10000,], aira[10000:15000,], 'nb')
+```
+
+Maybe because we are trying to use one model fit all stategy on all the restaurants, results are coming really bad. As we saw every restaurnt is very significant to the results before, let us try single model for different restaurnt 
+
+Taking only one restaurant information, only it's date as in 365 days
+```{r}
+ndf <- a_visited[a_visited$air_store_id == "air_36bcf77d3382d36e",]
+head(ndf)
+summary(ndf)
+ndf=ndf[,-1]
+head(ndf)
+ndf$visit_date=as.numeric(ndf$visit_date)%%365
+head(ndf)
+table(ndf$y)
+ndf1=ndf
+colnames(ndf1)[which(names(ndf1) == "visitors")] <- "y"
+tail(ndf1)
+ndf1$y[ndf1$y<17]=0
+ndf1$y[ndf1$y>=17]=1
+summary(ndf1$y)
+ndf1$y=as.numeric(ndf1$y)
+head(ndf1)
+```
+
+```{r}
+all.classifiers(ndf1)
+#timeseries.cv(ndf1, cl.name='dtree2', t.fold=16, get.performance=T) 
+```
+
+
+The results are better.
+D tree gives the minimum error and best f score
+So, we choose this as our model and now apply on test set.
+
+```{r}
+timeseries.cv(ndf1, cl.name='dtree', t.fold=16, get.performance=T, val=FALSE) 
+```
+We report this as our classifcation model results.
+
+Now we also try autoregressive models to predict one week in advance. 
+For this we only choose one particular restaurant that has all time series visitation information
+```{r}
+ggplot(ndf, aes(visit_date,visitors)) +geom_line(col = "blue") +labs(y = "All visitors", x = "Date")
+```
+
+
+Some preprocessing and cleansing( removing outliers)
+```{r}
+count_ts = ts(ndf[, c('visitors')])
+ndf$clean_cnt = tsclean(count_ts)
+ggplot() +geom_line(data = ndf, aes(x = visit_date, y = clean_cnt)) + ylab('!!!Cleaned!!!')
+```
+
+
+
+```{r}
+ndf$cnt_ma = ma(ndf$clean_cnt, order=7) # clean the dataset
+ndf$cnt_ma30 = ma(ndf$clean_cnt, order=3)
+ggplot() +
+  geom_line(data = ndf, aes(x = visit_date, y = clean_cnt, colour = "Counts")) +
+  geom_line(data = ndf, aes(x = visit_date, y = cnt_ma,   colour = "Weekly MA"))  +
+  geom_line(data = ndf, aes(x = visit_date, y = cnt_ma30, colour = "Three Days MA"))  +
+  ylab('Count')
+```
+
+
+
+```{r}
+head(ndf)
+```
+
+
+```{r}
+#deseasonalized series
+count_ma = ts(na.omit(ndf$cnt_ma30), frequency=7)
+decomp = stl(count_ma, s.window="periodic")
+deseasonal_cnt <- seasadj(decomp)
+plot(decomp)
+```
+
+
+```{r}
+adf.test(count_ma, alternative = "stationary")
+```
+
+
+```{r}
+Acf(count_ma, main='')
+Pacf(count_ma, main='')
+```
+
+
+```{r}
+count_d1 = diff(deseasonal_cnt, differences = 1)
+plot(count_d1)
+adf.test(count_d1, alternative = "stationary")
+```
+
+```{r}
+Acf(count_d1, main='ACF for Differenced Series')
+Pacf(count_d1, main='PACF for Differenced Series')
+```
+
+```{r}
+auto.arima(deseasonal_cnt, seasonal=FALSE)
+```
+
+```{r}
+fit<-auto.arima(deseasonal_cnt, seasonal=FALSE)
+tsdisplay(residuals(fit), lag.max=45, main='(1,1,1) Model Residuals')
+```
+
+```{r}
+fit2 = arima(deseasonal_cnt, order=c(1,1,7))
+fit2
+tsdisplay(residuals(fit2), lag.max=15, main='Seasonal Model Residuals')
+```
+
+```{r}
+fcast <- forecast(fit2, h=7)
+plot(fcast)
+```
+holdout the last month and start predicting on that. We got ARIMA parameters order from the ACF and PACF plots
+```{r}
+hold <- window(ts(deseasonal_cnt), start=440)
+fit_no_holdout = arima(ts(deseasonal_cnt[-c(440:470)]), order=c(1,1,7))
+fcast_no_holdout <- forecast(fit_no_holdout,h=31)
+y_=fcast_no_holdout$mean
+test=ndf[440:470,]
+y=test$y
+y
+tail(ndf)
+plot(fcast_no_holdout, main=" ")
+lines(ts(deseasonal_cnt))
+y_[y_<17]=0
+y_[y_>=17]=1
+y[y<17]=0
+y[y>=17]=1
+
+```
+
+```{r}
+#table(y,y_)
+```
+
+accuracy, precision, f score when regression result is used as classficiation classes.
+
+Regression results:
+```{r}
+fit_w_seasonality = auto.arima(deseasonal_cnt, seasonal=TRUE)
+fit_w_seasonality
+```
+
+## Prophet
+We used Prophet to predict the future visitation dates
+Prophet is the library that was developed by Facebook. It uses Additive Regression model. It automatically detects the changes in the trend, find some seasonal patterns 
+```{r}
+library(data.table)
+ndf_p <- read.csv("ndf_1.csv")
+ndf_p <- ndf_p[, c('visit_date', 'visitors')]
+setnames(ndf_p, old=c("visit_date","visitors"), new=c("ds", "y"))
+head(ndf_p)
+```
+
+```{r}
+library(prophet)
+m <- prophet(ndf_p)
+future <- make_future_dataframe(m, periods = 31)
+forecast <- predict(m, future)
+plot(m, forecast)
+```
+yhat column contains the forecast including additional columns like uncertainty intervals and seasonal components of the forecast 
+```{r}
+tail(forecast[c('ds', 'yhat', 'yhat_lower', 'yhat_upper')])
+y_=forecast$yhat[440:470]
+test=ndf[440:470,]
+y=test$y
+
+y_[y_<17]=0
+y_[y_>=17]=1
+y[y<17]=0
+y[y>=17]=1
+
+#table(y,y_)
+
+```
+
+This component allow us to see the forecast that has been broken into trends, weekly trends. As our data analysis part showed, more visitors go to the restaurants during the weekend (plus on Fridays)
+
+```{r}
+prophet_plot_components(m, forecast)
+```
+
+# Conclusions:
+Many features seemed to be very relevant for classficiation, but turned out to be not that useful, and date information alone is very good predictor for finding customer traffic. 
+
+##Future works:
+We later realise for the restaurant data we have used, the classes are not balanced i.e. thier median is not 17, and if we run on thier median of the hotel, we are getting bad results with classification but still good results with autoregressive models. The immideate future work needs finetune for classification models. Also, time series cross validation for the autoregressive models is yet to be implimented, like for classification we did. We have worked on weather data a lot but final manual change of names would take a lot of time before combining. We are not left with time, and hence we submit our code here. 
+
+
