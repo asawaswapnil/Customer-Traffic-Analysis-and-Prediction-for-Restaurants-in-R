@@ -1,4 +1,4 @@
-# customer-Traffic-Analysis-and-Prediction-for-Restaurants
+# Customer-Traffic-Analysis-and-Prediction-for-Restaurants
 
 Check out the Project_Report_Data_Mining.pdf to see the methods, anaylsis and results.
 
