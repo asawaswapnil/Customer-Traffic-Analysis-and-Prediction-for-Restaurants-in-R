@@ -1,5 +1,7 @@
 # customerTrafficforRestaurant
 
+Check out the Project_Report_Data_Mining.pdf to see the methods, anaylsis and results.
+
 
 Restaurants frequently face problem of either wastage of food on one hand, or devoiding their
 customers to provide enough choice because some items go out of stock. Sometimes, the
@@ -8,9 +10,6 @@ problem of restaurant business is the lack of effective prediction about number 
 would have in advance. In order to help restaurants to keep better management in their place, we
 try to predict approximate range of visitors will be visiting the restaurant for future dates using
 multiple datasets from different sources. 
-
-
-Check out the Project_Report_Data_Mining.pdf to see the methods, anaylsis and results.
 
 
 To run the code:
